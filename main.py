@@ -6,6 +6,8 @@ from models import Users, Files, InvalidToken
 from flask import Flask, g, jsonify, request, abort
 from flask_httpauth import HTTPBasicAuth
 from werkzeug.utils import secure_filename
+from sqlalchemy import or_
+import pandas as pd
 
 app = Flask(__name__)
 auth = HTTPBasicAuth()
@@ -31,7 +33,7 @@ def verify_password(username_or_token, password):
 
 @app.route('/')
 def main_win():
-    return("Main page")
+    return("Excel storage")
 
 @app.route('/api/get_token', methods=['GET'])
 @auth.login_required
@@ -94,7 +96,7 @@ def upload_excel_file():
                 )
                 session.add(excel_file)
                 session.commit()
-                return jsonify({"message": f"{secure_filename(file.filename)} uploaded and saved for user {1}"}), 200
+                return jsonify({"message": f"{secure_filename(file.filename)} uploaded and saved for user {user.user_id}"}), 200
             else:
                 return jsonify({"error": "File type not allowed"}), 400
     else:
@@ -136,6 +138,55 @@ def delete_file(filename):
             return jsonify({"deleted": filename}), 200
     return jsonify({"reason": "Method is not allowed"}), 404
 
+@app.route('/api/file_list', methods=['GET'])
+@auth.login_required
+def files_list():
+    if request.method == "GET":
+        with db.create_session() as session:
+            files = session.query(Files).filter(
+                or_(Files.user == g.user, Files.is_private == 0)).all()
+            if not files:
+                return jsonify({"info": "No files found for the user"}), 200
+            file_list = [{
+                "file_id": file.file_id,
+                "file_name": file.file_name,
+                "is_private": file.is_private,
+                "user_id": file.user_id
+            } for file in files]
+            return jsonify({
+                "message": "List of files related to the user or in public domain",
+                "file_list": file_list
+            }), 200
+    return abort(400)
+
+@app.route('/api/get_excel_file/<filename>', methods=['GET'])
+@auth.login_required
+def get_excel_file(filename):
+    def process_excel_file(file_path, filters=None, sorting=None):
+        df = pd.read_excel(file_path)
+        if filters:
+            for key, value in filters.items():
+                if key in df.columns:
+                    df = df[df[key] == value]
+        if sorting:
+            for key, value in sorting.items():
+                if key in df.columns:
+                    df = df.sort_values(by=key, ascending=(value.lower() == "asc"))
+        return df
+    filters = request.args.get('filters')
+    sorting = request.args.get('sorting')
+    if filters:
+        filters = json.loads(filters)
+    if sorting:
+        sorting = json.loads(sorting)
+    with db.create_session() as session:
+        file = session.query(Files).filter_by(file_name=filename, user=g.user).first()
+        if file:
+            file_path = file.file_path
+            df = process_excel_file(file_path, filters, sorting)
+            return df.to_json(orient="split", index=False)
+        else:
+            return jsonify({"error": "File not found"}), 404
 
 
 if __name__ == "__main__":
