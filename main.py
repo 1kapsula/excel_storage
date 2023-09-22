@@ -127,10 +127,6 @@ def delete_file(filename):
                 path = file.file_path
                 if os.path.exists(path):
                     os.remove(path)
-                    # print(f"File removed: {path}")
-                    # file_directory = os.path.dirname(path)
-                    # print(f"Starting at folder: {file_directory}")
-                    # delete_empty_directories(file_directory, path)
                 session.delete(file)
                 session.commit()
             else:
